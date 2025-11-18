@@ -35,7 +35,7 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
         aggregation: 'o--',
         composition: '*--',
         inheritance: '<|--',
-        dependency: '..>',
+        dependency: '..',
       }
 
       const symbol = symbols[rel.type] || '--'
@@ -43,6 +43,7 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
       diagram += `  ${rel.fromClass} ${symbol} ${rel.toClass}${label}\n`
     })
 
+    console.log('[v0] Generated Mermaid diagram:', diagram)
     return diagram
   }, [umlModel])
 
@@ -87,7 +88,6 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
             svg.style.display = 'block'
             svg.style.margin = '0 auto'
             
-            // Increase text size by 40% for better readability
             const textElements = svg.querySelectorAll('text, tspan')
             textElements.forEach((el) => {
               const fontSize = el.getAttribute('font-size') || '16'
@@ -96,15 +96,22 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
               el.setAttribute('font-family', 'Arial, sans-serif')
             })
 
-            // Increase line thickness for better visibility
-            const paths = svg.querySelectorAll('path, line, polyline')
-            paths.forEach((el) => {
+            const lines = svg.querySelectorAll('line, polyline')
+            lines.forEach((el) => {
               const currentStroke = el.getAttribute('stroke-width') || '1'
-              const newStroke = Math.max(parseFloat(currentStroke) * 1.2, 1.5)
+              const newStroke = Math.max(parseFloat(currentStroke) * 1.3, 2)
               el.setAttribute('stroke-width', `${newStroke}`)
             })
 
-            // Optimize text rendering
+            const paths = svg.querySelectorAll('path')
+            paths.forEach((el) => {
+              const currentStroke = el.getAttribute('stroke-width') || '1'
+              const newStroke = Math.max(parseFloat(currentStroke) * 1.3, 2)
+              el.setAttribute('stroke-width', `${newStroke}`)
+              el.setAttribute('stroke', '#7c3aed')
+              el.setAttribute('fill', 'none')
+            })
+
             const rects = svg.querySelectorAll('rect')
             rects.forEach((el) => {
               el.setAttribute('fill', '#e0e7ff')
