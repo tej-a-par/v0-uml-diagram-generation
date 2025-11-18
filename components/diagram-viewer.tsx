@@ -31,14 +31,14 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
 
     umlModel.relationships.forEach((rel) => {
       const symbols: Record<string, string> = {
-        association: '--',
+        association: '-->',  // Updated from '--' to '-->' for directional arrow
         aggregation: 'o--',
         composition: '*--',
         inheritance: '<|--',
         dependency: '..',
       }
 
-      const symbol = symbols[rel.type] || '--'
+      const symbol = symbols[rel.type] || '-->'
       const label = rel.label ? ` : ${rel.label}` : ''
       diagram += `  ${rel.fromClass} ${symbol} ${rel.toClass}${label}\n`
     })

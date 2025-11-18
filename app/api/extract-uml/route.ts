@@ -48,11 +48,152 @@ const UMLSchema = z.object({
 })
 
 function extractUMLFromRequirement(requirement: string) {
-  const nounPattern = /\b[A-Z][a-zA-Z]*\b/g
-  const potentialClasses = [...new Set(requirement.match(nounPattern) || [])]
-    .filter(word => word.length > 2 && !['The', 'This', 'That', 'Has', 'Is', 'Are', 'A', 'An', 'But', 'Or', 'And', 'With'].includes(word))
+  // First, clean up the requirement by removing leading articles
+  const cleanedRequirement = requirement
+    .replace(/\b(A|An|The)\s+([A-Z])/g, '$2') // Remove leading articles
+    .replace(/\b(Each|Some)\s+([A-Z])/g, '$2')
 
-  // Common attributes based on keywords
+  const nounPattern = /\b[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*\b/g
+  let potentialClasses = [...new Set(cleanedRequirement.match(nounPattern) || [])]
+    .filter(word => word.length > 2 && !['The', 'This', 'That', 'Has', 'Is', 'Are', 'A', 'An', 'But', 'Or', 'And', 'With', 'For', 'Each', 'Some', 'Orders', 'Can', 'Be', 'As', 'On', 'When', 'Multiple', 'One', 'Which'].includes(word))
+
+  potentialClasses = potentialClasses.filter((word, index, arr) => {
+    // Check if this is a plural form
+    if (word.endsWith('s') && word !== 'Items' && word !== 'Products') {
+      const singular = word.slice(0, -1)
+      if (arr.some(w => w === singular)) {
+        return false // Remove plural if singular exists
+      }
+    }
+    return true
+  })
+
+  const relationships: any[] = []
+  const relationshipSet = new Set<string>()
+
+  // Association patterns - now matching against CLEANED requirement
+  const associationPatterns = [
+    { pattern: /(\w+(?:\s+\w+)*?)\s+manages?\s+(?:multiple\s+)?(\w+(?:\s+\w+)*?)\s*[.,]/gi, label: 'manages' },
+    { pattern: /(\w+(?:\s+\w+)*?)\s+references?\s+(\w+(?:\s+\w+)*?)\s*[.,]/gi, label: 'references' },
+    { pattern: /(\w+(?:\s+\w+)*?)\s+(?:uses|depends\s+on)\s+(\w+(?:\s+\w+)*?)\s*[.,]/gi, label: 'uses' },
+    { pattern: /(\w+(?:\s+\w+)*?)\s+(?:is\s+)?associated\s+with\s+(\w+(?:\s+\w+)*?)\s*[.,]/gi, label: 'associates' },
+  ]
+
+  associationPatterns.forEach(({ pattern, label }) => {
+    let match
+    const regex = new RegExp(pattern.source, 'gi')
+    while ((match = regex.exec(cleanedRequirement)) !== null) {
+      let class1Name = match[1].trim()
+      let class2Name = match[2].trim()
+      
+      // Remove plurals for matching - convert "Items" to "Item"
+      if (class2Name.endsWith('s') && !class2Name.endsWith('ss')) {
+        class2Name = class2Name.slice(0, -1)
+      }
+      
+      // Capitalize first letter of each word
+      class1Name = class1Name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim()
+      class2Name = class2Name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim()
+      
+      // Find matching classes (case-insensitive, handling space variations)
+      const class1 = potentialClasses.find(c => 
+        c.toLowerCase() === class1Name.toLowerCase() || 
+        c.toLowerCase().replace(/\s+/g, '') === class1Name.toLowerCase().replace(/\s+/g, '')
+      )
+      const class2 = potentialClasses.find(c => 
+        c.toLowerCase() === class2Name.toLowerCase() || 
+        c.toLowerCase().replace(/\s+/g, '') === class2Name.toLowerCase().replace(/\s+/g, '') ||
+        (c.toLowerCase() + 's') === class2Name.toLowerCase() ||
+        c.toLowerCase() === class2Name.toLowerCase().replace(/s$/, '')
+      )
+      
+      console.log(`[v0] Association match: "${class1Name}" ${label} "${class2Name}" -> found: ${!!class1} & ${!!class2}`)
+      
+      if (class1 && class2 && class1 !== class2) {
+        const key = `${class1}-${class2}-${label}`
+        if (!relationshipSet.has(key)) {
+          relationships.push({
+            id: `rel-${relationships.length}`,
+            fromClass: class1,
+            toClass: class2,
+            type: 'association',
+            label: label,
+            multiplicity: {
+              from: '1',
+              to: '*',
+            },
+          })
+          relationshipSet.add(key)
+          console.log(`[v0] Added relationship: ${class1} --${label}--> ${class2}`)
+        }
+      }
+    }
+  })
+
+  const inheritancePatterns = [
+    /(\w+)\s+is\s+(?:a|an)\s+(\w+)/gi,
+    /(\w+)\s+extends\s+(\w+)/gi,
+    /(\w+)\s+inherits\s+from\s+(\w+)/gi,
+  ]
+
+  inheritancePatterns.forEach((pattern) => {
+    let match
+    const regex = new RegExp(pattern.source, 'gi')
+    while ((match = regex.exec(cleanedRequirement)) !== null) {
+      const class1Name = match[1].trim().charAt(0).toUpperCase() + match[1].trim().slice(1)
+      const class2Name = match[2].trim().charAt(0).toUpperCase() + match[2].trim().slice(1)
+      
+      const class1 = potentialClasses.find(c => c.toLowerCase() === class1Name.toLowerCase())
+      const class2 = potentialClasses.find(c => c.toLowerCase() === class2Name.toLowerCase())
+      
+      if (class1 && class2 && class1 !== class2) {
+        const key = `${class1}-${class2}-inheritance`
+        if (!relationshipSet.has(key)) {
+          relationships.push({
+            id: `rel-${relationships.length}`,
+            fromClass: class1,
+            toClass: class2,
+            type: 'inheritance',
+            label: 'inherits',
+          })
+          relationshipSet.add(key)
+        }
+      }
+    }
+  })
+
+  const compositionPatterns = [
+    /(\w+)\s+has\s+(?:a|an|multiple)\s+(\w+)/gi,
+    /(\w+)\s+owns\s+(?:a|an)?\s+(\w+)/gi,
+    /(\w+)\s+contains\s+(?:a|an)?\s+(\w+)/gi,
+  ]
+
+  compositionPatterns.forEach((pattern) => {
+    let match
+    const regex = new RegExp(pattern.source, 'gi')
+    while ((match = regex.exec(cleanedRequirement)) !== null) {
+      const class1Name = match[1].trim().charAt(0).toUpperCase() + match[1].trim().slice(1)
+      const class2Name = match[2].trim().charAt(0).toUpperCase() + match[2].trim().slice(1)
+      
+      const class1 = potentialClasses.find(c => c.toLowerCase() === class1Name.toLowerCase())
+      const class2 = potentialClasses.find(c => c.toLowerCase() === class2Name.toLowerCase())
+      
+      if (class1 && class2 && class1 !== class2) {
+        const key = `${class1}-${class2}-composition`
+        if (!relationshipSet.has(key)) {
+          relationships.push({
+            id: `rel-${relationships.length}`,
+            fromClass: class1,
+            toClass: class2,
+            type: 'composition',
+            label: 'has',
+          })
+          relationshipSet.add(key)
+        }
+      }
+    }
+  })
+
   const attributeMap: Record<string, string[]> = {
     User: ['username', 'password', 'email', 'id'],
     Admin: ['username', 'password', 'email', 'id', 'role', 'permissions'],
@@ -63,9 +204,11 @@ function extractUMLFromRequirement(requirement: string) {
     Employee: ['id', 'name', 'email', 'department', 'salary'],
     Post: ['id', 'title', 'content', 'author', 'createdAt'],
     Email: ['id', 'sender', 'recipient', 'subject', 'body'],
+    Warehouse: ['id', 'location', 'capacity'],
+    InventoryItem: ['quantity', 'name', 'sku'],
+    Shipment: ['trackingNumber', 'shipmentDate', 'status'],
   }
 
-  // Common methods based on class name
   const methodMap: Record<string, Array<{ name: string; returnType: string; params: Array<{ name: string; type: string }> }>> = {
     User: [
       { name: 'login', returnType: 'boolean', params: [{ name: 'username', type: 'string' }, { name: 'password', type: 'string' }] },
@@ -89,96 +232,27 @@ function extractUMLFromRequirement(requirement: string) {
       { name: 'send', returnType: 'boolean', params: [] },
       { name: 'markAsRead', returnType: 'void', params: [] },
     ],
+    Warehouse: [
+      { name: 'addInventory', returnType: 'void', params: [{ name: 'item', type: 'InventoryItem' }] },
+      { name: 'getInventory', returnType: 'InventoryItem[]', params: [] },
+    ],
+    InventoryItem: [
+      { name: 'updateQuantity', returnType: 'void', params: [{ name: 'quantity', type: 'int' }] },
+      { name: 'getDetails', returnType: 'object', params: [] },
+    ],
+    Shipment: [
+      { name: 'track', returnType: 'object', params: [] },
+      { name: 'updateStatus', returnType: 'void', params: [{ name: 'status', type: 'string' }] },
+    ],
   }
 
-  const relationships: any[] = []
-  const lowerReq = requirement.toLowerCase()
-
-  // Build relationships based on explicit text patterns
-  const relationshipSet = new Set<string>()
-
-  // More specific relationship detection
-  const inheritanceMatch = lowerReq.match(/(\w+)\s+is\s+a(?:n)?\s+(\w+)/gi) || []
-  inheritanceMatch.forEach((match) => {
-    const parts = match.split(/\s+is\s+a(?:n)?\s+/i)
-    if (parts.length === 2) {
-      const class1 = potentialClasses.find(c => c.toLowerCase() === parts[0].toLowerCase())
-      const class2 = potentialClasses.find(c => c.toLowerCase() === parts[1].toLowerCase())
-      if (class1 && class2 && class1 !== class2) {
-        const key = `${class1}-${class2}-inheritance`
-        if (!relationshipSet.has(key)) {
-          relationships.push({
-            id: `rel-${relationships.length}`,
-            fromClass: class1,
-            toClass: class2,
-            type: 'inheritance',
-          })
-          relationshipSet.add(key)
-        }
-      }
-    }
-  })
-
-  // Composition patterns (has a)
-  const compositionMatch = lowerReq.match(/(\w+)\s+has\s+a(?:n)?\s+(\w+)/gi) || []
-  compositionMatch.forEach((match) => {
-    const parts = match.split(/\s+has\s+a(?:n)?\s+/i)
-    if (parts.length === 2) {
-      const class1 = potentialClasses.find(c => c.toLowerCase() === parts[0].toLowerCase())
-      const class2 = potentialClasses.find(c => c.toLowerCase() === parts[1].toLowerCase())
-      if (class1 && class2 && class1 !== class2) {
-        const key = `${class1}-${class2}-composition`
-        if (!relationshipSet.has(key)) {
-          relationships.push({
-            id: `rel-${relationships.length}`,
-            fromClass: class1,
-            toClass: class2,
-            type: 'composition',
-          })
-          relationshipSet.add(key)
-        }
-      }
-    }
-  })
-
-  // Association patterns (contains, belongs to, associated with)
-  const associationPatterns = [
-    { regex: /(\w+)\s+contains\s+(?:a\s+)?(\w+)/gi, label: 'contains' },
-    { regex: /(\w+)\s+belongs\s+to\s+(?:a\s+)?(\w+)/gi, label: 'belongs to' },
-  ]
-
-  associationPatterns.forEach(({ regex }) => {
-    const tempRegex = new RegExp(regex.source, 'gi')
-    let match
-    while ((match = tempRegex.exec(requirement)) !== null) {
-      const class1 = potentialClasses.find(c => c.toLowerCase() === match[1].toLowerCase())
-      const class2 = potentialClasses.find(c => c.toLowerCase() === match[2].toLowerCase())
-      if (class1 && class2 && class1 !== class2) {
-        const key = `${class1}-${class2}-association`
-        if (!relationshipSet.has(key)) {
-          relationships.push({
-            id: `rel-${relationships.length}`,
-            fromClass: class1,
-            toClass: class2,
-            type: 'association',
-          })
-          relationshipSet.add(key)
-        }
-      }
-    }
-  })
-
-  // Removed the old pattern based relationship detection
-  // Moved the old relationship detection logic to the bottom
-
-  // Build class objects
   const classes = potentialClasses.map((className, index) => ({
     id: `class-${index}`,
     name: className,
     attributes: (attributeMap[className] || []).map((attr, idx) => ({
       id: `attr-${index}-${idx}`,
       name: attr,
-      type: attr === 'id' || attr === 'password' ? 'string' : attr.includes('price') || attr.includes('salary') || attr.includes('balance') ? 'number' : 'string',
+      type: attr === 'id' ? 'string' : attr.includes('quantity') ? 'int' : attr.includes('Date') || attr.includes('date') ? 'Date' : 'string',
       visibility: 'private' as const,
     })),
     methods: (methodMap[className] || []).map((method, idx) => ({
