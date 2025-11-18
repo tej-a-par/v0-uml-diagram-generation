@@ -31,7 +31,7 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
 
     umlModel.relationships.forEach((rel) => {
       const symbols: Record<string, string> = {
-        association: '-->',  // Updated from '--' to '-->' for directional arrow
+        association: '-->',
         aggregation: 'o--',
         composition: '*--',
         inheritance: '<|--',
@@ -39,8 +39,15 @@ export function DiagramViewer({ umlModel }: { umlModel: UMLModel }) {
       }
 
       const symbol = symbols[rel.type] || '-->'
-      const label = rel.label ? ` : ${rel.label}` : ''
-      diagram += `  ${rel.fromClass} ${symbol} ${rel.toClass}${label}\n`
+      
+      // Build label with multiplicity information
+      let fullLabel = rel.label || ''
+      if (rel.multiplicity) {
+        fullLabel += ` [${rel.multiplicity.from}..${rel.multiplicity.to}]`
+      }
+      
+      const labelStr = fullLabel ? ` : ${fullLabel}` : ''
+      diagram += `  ${rel.fromClass} ${symbol} ${rel.toClass}${labelStr}\n`
     })
 
     console.log('[v0] Generated Mermaid diagram:', diagram)
